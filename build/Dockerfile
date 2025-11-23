@@ -28,8 +28,12 @@ RUN apt install -y --no-install-recommends \
     ca-certificates \
     wget
 
-# Install Chromium for headless testing
-RUN apt install -y --no-install-recommends chromium-browser
+# Install Google Chrome (recommended for CI/CD)
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
+    && apt update \
+    && apt install -y google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set up the actions runner
 RUN cd /home/docker && mkdir actions-runner && cd actions-runner \
