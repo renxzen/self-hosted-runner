@@ -1,20 +1,23 @@
-version: '3.8'
-
 services:
   runner:
-    image: youssefbrr/github-actions:latest # You can use this image or build your own
+    build:
+      context: ./build
+      dockerfile: Dockerfile
+    platform: linux/amd64
     restart: always
     environment:
       - REPO=<owner>/<repo>
+      - NAME=<runner-name>- REPO=<owner>/<repo>
+      # Token options (choose ONE):
       - REG_TOKEN=<reg-token-for-self-hosted-runner>
-      - NAME=<runner-name>
+      - PAT_TOKEN=<pat-token-for-automatic-token-generation>
     deploy:
       mode: replicated
       replicas: 2
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
         reservations:
-          cpus: '0.4'
+          cpus: "0.4"
           memory: 256M
