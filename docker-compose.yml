@@ -1,8 +1,6 @@
 services:
   runner:
-    build:
-      context: ./build
-      dockerfile: Dockerfile
+    image: renxzen/github-actions
     platform: linux/amd64
     restart: always
     environment:
