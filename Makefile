@@ -1,3 +1,4 @@
+VERSION=1.0.2
 .PHONY: up down build
 
 up:
@@ -5,8 +6,8 @@ up:
 down:
 	@docker compose down
 
-build:
+publish:
 	@docker buildx build \
 		--platform linux/amd64 \
-		-t renxzen/github-actions:latest \
+		-t renxzen/github-actions:v$(VERSION) \
 		--push ./build

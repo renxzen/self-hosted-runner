@@ -26,7 +26,8 @@ RUN apt install -y --no-install-recommends \
     gnupg \
     gnupg2 \
     ca-certificates \
-    wget
+    wget \
+    bc
 
 # Install Google Chrome (recommended for CI/CD)
 RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
