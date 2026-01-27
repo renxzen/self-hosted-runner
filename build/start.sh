@@ -103,8 +103,8 @@ start_runner() {
 	local runner_dir="$1"
 	local label="$2"
 	cd "$runner_dir" || exit
-	stdbuf -oL -eL ./run.sh 2>&1 | sed -u "s/^/[${label}] /" &
-	echo $!
+	stdbuf -oL -eL ./run.sh 2>&1 | awk -v p="[${label}] " '{print p $0; fflush();}' &
+	RUNNER_PID=$!
 }
 
 if [ -n "$REPOS" ]; then
@@ -192,9 +192,9 @@ echo "Start"
 for i in "${!RUNNER_DIRS[@]}"; do
 	runner_dir="${RUNNER_DIRS[$i]}"
 	label="${RUNNER_REPOS[$i]}"
-	pid=$(start_runner "$runner_dir" "$label")
-	echo "Started: ${label} (pid ${pid})"
-	RUNNER_PIDS+=("$pid")
+	start_runner "$runner_dir" "$label"
+	echo "Started: ${label} (pid ${RUNNER_PID})"
+	RUNNER_PIDS+=("$RUNNER_PID")
 done
 
 cleanup() {
