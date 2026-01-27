@@ -1,18 +1,48 @@
 services:
   runner:
-    image: renxzen/github-actions
+    image: renxzen/github-actions:latest
     platform: linux/amd64
     restart: always
+
+    # Compose limits (caps), not reservations.
+    # Set these based on your host capacity and expected concurrent jobs.
     cpus: 2.0
     mem_limit: 3g
+
     environment:
+      # Base name prefix for runners. In REPOS mode, actual names become:
+      #   ${NAME}-<owner>-<repo>
       - NAME=<runner-name>
 
-      # Use only one of these (REPO,REPOS,ORG)
-      - REPO=<owner>/<repo>
-      # - REPOS=<owner>/<repo1>,<owner>/<repo2>,<owner>/<repo3>
-      # - ORG=<org>
+      # Scope (set exactly ONE):
+      # - REPO: single repository runner
+      # - REPOS: multiple repositories (comma-separated)
+      # - ORG: organization runner (only if repos are under an org)
+      #
+      # Examples:
+      # - REPO=owner/repo
+      # - REPOS=owner/repo1,owner/repo2,owner/repo3
+      # - ORG=my-org
+      - REPOS=<owner>/<repo1>,<owner>/<repo2>
 
-      # Token options (choose ONE):
-      - REG_TOKEN=<reg-token-for-self-hosted-runner>
-      - PAT_TOKEN=<pat-token-for-automatic-token-generation>
+      # Auth (choose ONE):
+      # - PAT_TOKEN: recommended (auto-generates short-lived reg/remove tokens)
+      # - REG_TOKEN: manual registration token (single-scope only)
+      #
+      # NOTE: REPOS mode requires PAT_TOKEN.
+      - PAT_TOKEN=<personal-access-token>
+      # - REG_TOKEN=<registration-token>
+
+      # Optional:
+      # - REMOVE_ON_EXIT=1 will deregister runners on container stop.
+      #   Leaving it unset avoids "active session" issues on rapid restarts.
+      # - REMOVE_ON_EXIT=1
+
+    # Persist runner state across container recreation.
+    # Without this, redeploys can re-register runners and trigger
+    # "already has an active session" / duplicate runner entries.
+    volumes:
+      - runner-data:/home/docker
+
+volumes:
+  runner-data:

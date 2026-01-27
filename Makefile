@@ -1,4 +1,4 @@
-VERSION=1.0.2
+VERSION=1.1.1
 .PHONY: up down build
 
 up:

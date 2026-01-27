@@ -8,6 +8,7 @@ ORG="${ORG:-}"
 NAME="${NAME:-}"
 PAT_TOKEN="${PAT_TOKEN:-}"
 REG_TOKEN="${REG_TOKEN:-}"
+REMOVE_ON_EXIT="${REMOVE_ON_EXIT:-}"
 
 TEMPLATE_DIR=/home/docker/actions-runner-template
 BASE_DIR=/home/docker
@@ -101,16 +102,24 @@ if [ -n "$REPOS" ]; then
     runner_name="${NAME}-${repo_safe}"
     runner_dir="${BASE_DIR}/actions-runner-${idx}"
 
-    rm -rf "$runner_dir"
-    cp -a "$TEMPLATE_DIR" "$runner_dir"
-
     scope_url="https://github.com/${repo_trimmed}"
     reg_token_url="https://api.github.com/repos/${repo_trimmed}/actions/runners/registration-token"
+
+    if [ ! -d "$runner_dir" ]; then
+      cp -a "$TEMPLATE_DIR" "$runner_dir"
+    fi
+
+    if [ ! -f "$runner_dir/.runner" ]; then
+      rm -rf "$runner_dir"
+      cp -a "$TEMPLATE_DIR" "$runner_dir"
+      register_runner "$runner_dir" "$scope_url" "$reg_token_url" "$repo_trimmed" "$runner_name"
+    else
+      echo "Configured: ${repo_trimmed}"
+    fi
 
     RUNNER_DIRS+=("$runner_dir")
     RUNNER_REPOS+=("$repo_trimmed")
 
-    register_runner "$runner_dir" "$scope_url" "$reg_token_url" "$repo_trimmed" "$runner_name"
     pid=$(start_runner "$runner_dir")
     RUNNER_PIDS+=("$pid")
 
@@ -118,8 +127,9 @@ if [ -n "$REPOS" ]; then
   done
 else
   runner_dir="${BASE_DIR}/actions-runner-0"
-  rm -rf "$runner_dir"
-  cp -a "$TEMPLATE_DIR" "$runner_dir"
+  if [ ! -d "$runner_dir" ]; then
+    cp -a "$TEMPLATE_DIR" "$runner_dir"
+  fi
 
   if [ -n "$ORG" ]; then
     scope_url="https://github.com/${ORG}"
@@ -136,13 +146,24 @@ else
   RUNNER_DIRS+=("$runner_dir")
   RUNNER_REPOS+=("$label")
 
-  register_runner "$runner_dir" "$scope_url" "$reg_token_url" "$label" "$NAME"
+  if [ ! -f "$runner_dir/.runner" ]; then
+    rm -rf "$runner_dir"
+    cp -a "$TEMPLATE_DIR" "$runner_dir"
+    register_runner "$runner_dir" "$scope_url" "$reg_token_url" "$label" "$NAME"
+  else
+    echo "Configured: ${label}"
+  fi
   pid=$(start_runner "$runner_dir")
   RUNNER_PIDS+=("$pid")
 fi
 
 cleanup() {
   echo "Cleanup"
+
+  if [ "$REMOVE_ON_EXIT" != "1" ]; then
+    echo "Skip deregister"
+    return
+  fi
 
   for i in "${!RUNNER_DIRS[@]}"; do
     runner_dir="${RUNNER_DIRS[$i]}"
