@@ -3,19 +3,16 @@ services:
     image: renxzen/github-actions
     platform: linux/amd64
     restart: always
+    cpus: 2.0
+    mem_limit: 3g
     environment:
+      - NAME=<runner-name>
+
+      # Use only one of these (REPO,REPOS,ORG)
       - REPO=<owner>/<repo>
-      - NAME=<runner-name>- REPO=<owner>/<repo>
+      # - REPOS=<owner>/<repo1>,<owner>/<repo2>,<owner>/<repo3>
+      # - ORG=<org>
+
       # Token options (choose ONE):
       - REG_TOKEN=<reg-token-for-self-hosted-runner>
       - PAT_TOKEN=<pat-token-for-automatic-token-generation>
-    deploy:
-      mode: replicated
-      replicas: 2
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-        reservations:
-          cpus: "0.4"
-          memory: 256M

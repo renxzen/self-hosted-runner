@@ -1,54 +1,174 @@
 #!/bin/bash
 
-REPO=$REPO
-NAME=$NAME
+set -euo pipefail
 
-cd /home/docker/actions-runner || exit
+REPO="${REPO:-}"
+REPOS="${REPOS:-}"
+ORG="${ORG:-}"
+NAME="${NAME:-}"
+PAT_TOKEN="${PAT_TOKEN:-}"
+REG_TOKEN="${REG_TOKEN:-}"
 
-# Token management: Support both PAT_TOKEN and REG_TOKEN
-if [ -n "$PAT_TOKEN" ]; then
-  # Use PAT to generate registration token programmatically
-  echo "Using PAT_TOKEN to generate registration token..."
-  REG_TOKEN=$(curl -s -X POST -H "Authorization: token ${PAT_TOKEN}" \
-    -H "Accept: application/vnd.github.v3+json" \
-    "https://api.github.com/repos/${REPO}/actions/runners/registration-token" | jq -r .token)
+TEMPLATE_DIR=/home/docker/actions-runner-template
+BASE_DIR=/home/docker
 
-  if [ -z "$REG_TOKEN" ] || [ "$REG_TOKEN" = "null" ]; then
-    echo "Failed to generate registration token. Check your PAT_TOKEN and repository."
-    exit 1
-  fi
-  echo "Registration token generated successfully."
-
-elif [ -n "$REG_TOKEN" ]; then
-  # Use provided registration token directly
-  echo "Using provided REG_TOKEN..."
-
-else
-  echo "Error: Neither PAT_TOKEN nor REG_TOKEN is defined."
-  echo "Please provide either PAT_TOKEN (for dynamic token generation) or REG_TOKEN (direct token)."
+if [ -z "$NAME" ]; then
+  echo "Error: NAME is required."
   exit 1
 fi
 
-echo "Registering runner..."
-./config.sh --url https://github.com/${REPO} --token ${REG_TOKEN} --name ${NAME}
+scope_count=0
+[ -n "$REPOS" ] && scope_count=$((scope_count+1))
+[ -n "$REPO" ] && scope_count=$((scope_count+1))
+[ -n "$ORG" ] && scope_count=$((scope_count+1))
+if [ "$scope_count" -ne 1 ]; then
+  echo "Error: set exactly one of REPOS, REPO, ORG."
+  exit 1
+fi
+
+if [ -n "$REPOS" ] && [ -z "$PAT_TOKEN" ]; then
+  echo "Error: PAT_TOKEN is required for REPOS."
+  exit 1
+fi
+
+# Prepare template directory (runner files without per-runner state)
+if [ ! -d "$TEMPLATE_DIR" ]; then
+  if [ -d /home/docker/actions-runner ]; then
+    mv /home/docker/actions-runner "$TEMPLATE_DIR"
+  else
+    echo "Error: runner template missing."
+    exit 1
+  fi
+fi
+
+gh_token() {
+  local token_url="$1"
+  local token
+  token=$(curl -s -X POST -H "Authorization: token ${PAT_TOKEN}" \
+    -H "Accept: application/vnd.github.v3+json" \
+    "${token_url}" | jq -r .token)
+  if [ -z "$token" ] || [ "$token" = "null" ]; then
+    return 1
+  fi
+  echo "$token"
+}
+
+declare -a RUNNER_DIRS
+declare -a RUNNER_REPOS
+declare -a RUNNER_PIDS
+
+register_runner() {
+  local runner_dir="$1"
+  local scope_url="$2"
+  local reg_token_url="$3"
+  local label="$4"
+  local runner_name="$5"
+
+  local token="$REG_TOKEN"
+  if [ -n "$PAT_TOKEN" ]; then
+    token=$(gh_token "$reg_token_url") || {
+      echo "Error: token fetch failed (${label})."
+      exit 1
+    }
+  fi
+  if [ -z "$token" ]; then
+    echo "Error: REG_TOKEN or PAT_TOKEN is required."
+    exit 1
+  fi
+
+  echo "Register: ${label}"
+  cd "$runner_dir" || exit
+  ./config.sh --unattended --replace --url "$scope_url" --token "$token" --name "$runner_name"
+}
+
+start_runner() {
+  local runner_dir="$1"
+  cd "$runner_dir" || exit
+  ./run.sh &
+  echo $!
+}
+
+if [ -n "$REPOS" ]; then
+  IFS=',' read -r -a repos <<< "$REPOS"
+  idx=0
+  for repo in "${repos[@]}"; do
+    repo_trimmed=$(echo "$repo" | xargs)
+    if [ -z "$repo_trimmed" ]; then
+      continue
+    fi
+
+    repo_safe=$(echo "$repo_trimmed" | tr '/' '-')
+    runner_name="${NAME}-${repo_safe}"
+    runner_dir="${BASE_DIR}/actions-runner-${idx}"
+
+    rm -rf "$runner_dir"
+    cp -a "$TEMPLATE_DIR" "$runner_dir"
+
+    scope_url="https://github.com/${repo_trimmed}"
+    reg_token_url="https://api.github.com/repos/${repo_trimmed}/actions/runners/registration-token"
+
+    RUNNER_DIRS+=("$runner_dir")
+    RUNNER_REPOS+=("$repo_trimmed")
+
+    register_runner "$runner_dir" "$scope_url" "$reg_token_url" "$repo_trimmed" "$runner_name"
+    pid=$(start_runner "$runner_dir")
+    RUNNER_PIDS+=("$pid")
+
+    idx=$((idx+1))
+  done
+else
+  runner_dir="${BASE_DIR}/actions-runner-0"
+  rm -rf "$runner_dir"
+  cp -a "$TEMPLATE_DIR" "$runner_dir"
+
+  if [ -n "$ORG" ]; then
+    scope_url="https://github.com/${ORG}"
+    reg_token_url="https://api.github.com/orgs/${ORG}/actions/runners/registration-token"
+    remove_token_url="https://api.github.com/orgs/${ORG}/actions/runners/remove-token"
+    label="$ORG"
+  else
+    scope_url="https://github.com/${REPO}"
+    reg_token_url="https://api.github.com/repos/${REPO}/actions/runners/registration-token"
+    remove_token_url="https://api.github.com/repos/${REPO}/actions/runners/remove-token"
+    label="$REPO"
+  fi
+
+  RUNNER_DIRS+=("$runner_dir")
+  RUNNER_REPOS+=("$label")
+
+  register_runner "$runner_dir" "$scope_url" "$reg_token_url" "$label" "$NAME"
+  pid=$(start_runner "$runner_dir")
+  RUNNER_PIDS+=("$pid")
+fi
 
 cleanup() {
-  echo "Removing runner..."
+  echo "Cleanup"
 
-  if [ -n "$PAT_TOKEN" ]; then
-    # Generate a new removal token using PAT
-    REMOVE_TOKEN=$(curl -s -X POST -H "Authorization: token ${PAT_TOKEN}" \
-      -H "Accept: application/vnd.github.v3+json" \
-      "https://api.github.com/repos/${REPO}/actions/runners/remove-token" | jq -r .token)
-    ./config.sh remove --unattended --token ${REMOVE_TOKEN}
-  else
-    # Use the registration token for removal
-    ./config.sh remove --unattended --token ${REG_TOKEN}
-  fi
+  for i in "${!RUNNER_DIRS[@]}"; do
+    runner_dir="${RUNNER_DIRS[$i]}"
+    repo="${RUNNER_REPOS[$i]}"
+
+    cd "$runner_dir" || continue
+
+    if [ -n "$REPOS" ]; then
+      remove_token_url="https://api.github.com/repos/${repo}/actions/runners/remove-token"
+      REMOVE_TOKEN=$(gh_token "$remove_token_url" || true)
+      [ -n "$REMOVE_TOKEN" ] && ./config.sh remove --unattended --token "$REMOVE_TOKEN"
+      continue
+    fi
+
+    if [ -n "$PAT_TOKEN" ]; then
+      REMOVE_TOKEN=$(gh_token "$remove_token_url" || true)
+      [ -n "$REMOVE_TOKEN" ] && ./config.sh remove --unattended --token "$REMOVE_TOKEN"
+    else
+      [ -n "$REG_TOKEN" ] && ./config.sh remove --unattended --token "$REG_TOKEN"
+    fi
+  done
 }
 
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 
-./run.sh &
-wait $!
+for pid in "${RUNNER_PIDS[@]}"; do
+  wait "$pid"
+done
